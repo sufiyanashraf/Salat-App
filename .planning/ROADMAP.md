@@ -6,7 +6,7 @@ Salat Tracker will be built in five distinct phases. It starts by establishing r
 
 ## Phases
 
-- [ ] **Phase 1: Foundation & Data** - Establish local storage and API integration for prayer times.
+- [x] **Phase 1: Foundation & Data** - Establish local storage and API integration for prayer times. (completed 2026-06-14)
 - [ ] **Phase 2: Core Locking Engine** - Build the robust AccessibilityService lock overlay and whitelisting.
 - [ ] **Phase 3: Scheduling Automation** - Automatically trigger locks at specific daily prayer times.
 - [ ] **Phase 4: ML & Verification** - Implement CameraX and on-device MediaPipe ML for mat verification.
@@ -24,7 +24,7 @@ Salat Tracker will be built in five distinct phases. It starts by establishing r
 **Plans**: TBD
 
 Plans:
-- [ ] 01-01: Initialize DataStore, Room DB, and basic API client.
+- [x] 01-01: Initialize DataStore, Room DB, and basic API client.
 
 ### Phase 2: Core Locking Engine
 **Goal**: Build the robust blocking mechanism using AccessibilityService.
@@ -88,7 +88,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation & Data | 0/1 | Not started | - |
+| 1. Foundation & Data | 1/1 | Complete    | 2026-06-14 |
 | 2. Core Locking Engine | 0/2 | Not started | - |
 | 3. Scheduling Automation | 0/1 | Not started | - |
 | 4. ML & Verification | 0/2 | Not started | - |
