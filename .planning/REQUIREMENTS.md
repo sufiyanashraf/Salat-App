@@ -43,20 +43,20 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PRAY-01 | - | Pending |
-| PRAY-02 | - | Pending |
-| LOCK-01 | - | Pending |
-| LOCK-02 | - | Pending |
-| LOCK-03 | - | Pending |
-| VERI-01 | - | Pending |
-| VERI-02 | - | Pending |
-| VERI-03 | - | Pending |
-| VERI-04 | - | Pending |
+| PRAY-01 | Phase 1 | Pending |
+| PRAY-02 | Phase 3 | Pending |
+| LOCK-01 | Phase 2 | Pending |
+| LOCK-02 | Phase 2 | Pending |
+| LOCK-03 | Phase 2 | Pending |
+| VERI-01 | Phase 4 | Pending |
+| VERI-02 | Phase 4 | Pending |
+| VERI-03 | Phase 4 | Pending |
+| VERI-04 | Phase 2 | Pending |
 
 **Coverage:**
 - v1 requirements: 9 total
-- Mapped to phases: 0
-- Unmapped: 9 ⚠️
+- Mapped to phases: 9
+- Unmapped: 0 ✅
 
 ---
 *Requirements defined: 2026-06-14*
