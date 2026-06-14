@@ -32,7 +32,6 @@ captures/
 obj/
 
 # GSD / System
-.planning/debug/
-.planning/worktrees/
-.planning/scratch.json
+.planning/
+GEMINI.md
 .system_generated/
