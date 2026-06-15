@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Salat Tracker</string>
+    <string name="accessibility_service_description">Salat Tracker requires this service to block distracting apps during prayer times.</string>
 </resources>
