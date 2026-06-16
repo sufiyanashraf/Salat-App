@@ -21,6 +21,11 @@ class PrayerTimeRepository(
         return dao.getPrayerTimeByDate(today, lat, lng)
     }
 
+    suspend fun getTodayPrayerTimesOnce(lat: Double, lng: Double): PrayerTimeEntity? {
+        val today = LocalDate.now().format(dbDateFormatter)
+        return dao.getPrayerTimeByDateOnce(today, lat, lng)
+    }
+
     fun getPrayerTimesForMonth(yearMonth: String, lat: Double, lng: Double): Flow<List<PrayerTimeEntity>> {
         return dao.getPrayerTimesForMonth(yearMonth, lat, lng)
     }

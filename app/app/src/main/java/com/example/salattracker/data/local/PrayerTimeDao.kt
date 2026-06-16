@@ -19,6 +19,11 @@ interface PrayerTimeDao {
     )
     fun getPrayerTimesForMonth(yearMonth: String, lat: Double, lng: Double): Flow<List<PrayerTimeEntity>>
 
+    @Query(
+        "SELECT * FROM prayer_times WHERE date = :date AND latitude = :lat AND longitude = :lng LIMIT 1"
+    )
+    suspend fun getPrayerTimeByDateOnce(date: String, lat: Double, lng: Double): PrayerTimeEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPrayerTimes(vararg prayerTimes: PrayerTimeEntity)
 
