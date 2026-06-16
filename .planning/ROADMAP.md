@@ -64,7 +64,7 @@ Plans:
 **Plans**: TBD
 
 Plans:
-- [ ] 04-01: Integrate CameraX and MediaPipe for on-device fabric detection.
+- [x] 04-01: Integrate CameraX and MediaPipe for on-device fabric detection.
 
 ### Phase 5: Polish & Hardening
 **Goal**: Ensure the app survives OEM battery managers and device reboots.
