@@ -48,7 +48,8 @@ class AppLockAccessibilityService : AccessibilityService() {
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             // Omitting FLAG_NOT_FOCUSABLE → overlay intercepts Back button.
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED,
             PixelFormat.TRANSLUCENT,
         )
     }
@@ -132,6 +133,7 @@ class AppLockAccessibilityService : AccessibilityService() {
                     onEmergencyUnlockHold = {
                         LockManager.setLocked(false)
                     },
+                    onVerifySuccess = { LockManager.setLocked(false) },
                 )
             }
         }
