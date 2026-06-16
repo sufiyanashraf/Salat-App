@@ -1,6 +1,10 @@
 package com.example.salattracker.ui.main
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -11,11 +15,13 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavKey
@@ -31,6 +37,19 @@ fun MainScreen(
 ) {
   val state by viewModel.uiState.collectAsStateWithLifecycle()
   val context = LocalContext.current
+
+  // ── Camera permission request ──────────────────────────────────
+  val cameraPermissionLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.RequestPermission()
+  ) { /* no-op: permission result handled silently */ }
+
+  LaunchedEffect(Unit) {
+    if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
+        != PackageManager.PERMISSION_GRANTED
+    ) {
+      cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+    }
+  }
 
   Column(modifier = modifier) {
     when (state) {
@@ -86,3 +105,4 @@ fun MainScreenPreview() {
 fun MainScreenPortraitPreview() {
   SalatTrackerTheme { MainScreen(listOf("Android")) }
 }
+
