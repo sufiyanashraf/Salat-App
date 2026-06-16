@@ -21,6 +21,8 @@ kotlinxSerialization = "1.8.1"
 hilt = "2.56.2"
 hiltWork = "1.2.0"
 workManager = "2.10.1"
+camerax = "1.6.1"
+mediapipe = "0.10.35"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidxCore" }
@@ -58,6 +60,11 @@ hilt-android-compiler = { module = "com.google.dagger:hilt-android-compiler", ve
 hilt-work = { module = "androidx.hilt:hilt-work", version.ref = "hiltWork" }
 hilt-compiler = { module = "androidx.hilt:hilt-compiler", version.ref = "hiltWork" }
 work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "workManager" }
+androidx-camera-core = { module = "androidx.camera:camera-core", version.ref = "camerax" }
+androidx-camera-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "camerax" }
+androidx-camera-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "camerax" }
+androidx-camera-view = { module = "androidx.camera:camera-view", version.ref = "camerax" }
+mediapipe-tasks-vision = { module = "com.google.mediapipe:tasks-vision", version.ref = "mediapipe" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "androidGradlePlugin" }
