@@ -87,6 +87,12 @@ class AppLockAccessibilityService : AccessibilityService() {
 
         if (!isCurrentlyLocked) return
 
+        // Prevent infinite blinking loop: when our overlay draws, it triggers an event.
+        // If we process our own package, it might detach the overlay, causing a loop.
+        if (packageName == this.packageName) {
+            return
+        }
+
         val whitelist = buildWhitelist()
         if (packageName in whitelist) {
             // Whitelisted app → temporarily remove overlay so user can use it
@@ -179,6 +185,9 @@ class AppLockAccessibilityService : AccessibilityService() {
 
         // Always allow the system telecom service
         whitelist.add("com.android.server.telecom")
+        
+        // Allow System UI (notification shade, recent apps, lock screen)
+        whitelist.add("com.android.systemui")
 
         // Allow this app itself
         whitelist.add(packageName)
