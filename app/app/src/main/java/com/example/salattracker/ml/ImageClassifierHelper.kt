@@ -49,7 +49,7 @@ class ImageClassifierHelper(private val context: Context) {
 
         val validLabels = listOf("rug", "doormat", "fabric", "velvet", "window shade")
         return results?.classificationResult()?.classifications()?.firstOrNull()?.categories()?.any { category ->
-            validLabels.contains(category.categoryName()) && category.score() > 0.5f
+            validLabels.contains(category.categoryName()) && category.score() > 0.2f
         } == true
     }
 }

@@ -210,6 +210,15 @@ class AppLockAccessibilityService : AccessibilityService() {
             Log.w(TAG, "Could not resolve default SMS app", e)
         }
 
+        // Resolve the default home launcher
+        try {
+            val intent = Intent(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_HOME) }
+            val launcherInfo = packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+            launcherInfo?.activityInfo?.packageName?.let { whitelist.add(it) }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not resolve default launcher", e)
+        }
+
         return whitelist
     }
 }
