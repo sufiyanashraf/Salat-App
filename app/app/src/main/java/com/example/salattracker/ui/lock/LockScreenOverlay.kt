@@ -288,6 +288,7 @@ private fun CameraVerificationScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
     var isProcessing by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
 
     val hasCameraPermission = remember {
         ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
@@ -390,6 +391,18 @@ private fun CameraVerificationScreen(
                 verticalArrangement = Arrangement.Bottom,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
+                if (errorMessage != null) {
+                    Text(
+                        text = errorMessage!!,
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier
+                            .background(Color.Red.copy(alpha = 0.8f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                     modifier = Modifier.fillMaxWidth(),
@@ -412,6 +425,7 @@ private fun CameraVerificationScreen(
                         onClick = {
                             if (isProcessing) return@Button
                             isProcessing = true
+                            errorMessage = null
                             scope.launch {
                                 try {
                                     val success = captureAndVerify(
@@ -422,10 +436,10 @@ private fun CameraVerificationScreen(
                                     if (success) {
                                         onVerifySuccess()
                                     } else {
-                                        Toast.makeText(context, "Mat not detected", Toast.LENGTH_SHORT).show()
+                                        errorMessage = "Mat not detected. Please try again."
                                     }
                                 } catch (e: Exception) {
-                                    Toast.makeText(context, "Capture failed, try again", Toast.LENGTH_SHORT).show()
+                                    errorMessage = "Capture failed. Try again."
                                 } finally {
                                     isProcessing = false
                                 }
