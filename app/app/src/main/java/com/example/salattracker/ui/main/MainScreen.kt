@@ -1,10 +1,8 @@
 package com.example.salattracker.ui.main
 
-import android.Manifest
-import android.content.pm.PackageManager
+import android.os.PowerManager
+import android.provider.Settings
 import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -21,10 +19,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavKey
+import com.example.salattracker.SetupWizard
 import com.example.salattracker.data.DefaultDataRepository
 import com.example.salattracker.scheduler.DefaultPrayerAlarmScheduler
 import com.example.salattracker.theme.SalatTrackerTheme
@@ -38,16 +36,19 @@ fun MainScreen(
   val state by viewModel.uiState.collectAsStateWithLifecycle()
   val context = LocalContext.current
 
-  // ── Camera permission request ──────────────────────────────────
-  val cameraPermissionLauncher = rememberLauncherForActivityResult(
-    contract = ActivityResultContracts.RequestPermission()
-  ) { /* no-op: permission result handled silently */ }
-
+  // ── Check required settings and redirect to setup wizard if missing ──
   LaunchedEffect(Unit) {
-    if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
-        != PackageManager.PERMISSION_GRANTED
-    ) {
-      cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+    val pm = context.getSystemService(PowerManager::class.java)
+    val isBatteryOptimized = pm?.isIgnoringBatteryOptimizations(context.packageName) == true
+
+    val enabledServices = Settings.Secure.getString(
+      context.contentResolver,
+      Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+    )
+    val isAccessibilityEnabled = enabledServices?.contains(context.packageName) == true
+
+    if (!isBatteryOptimized || !isAccessibilityEnabled) {
+      onItemClick(SetupWizard)
     }
   }
 
