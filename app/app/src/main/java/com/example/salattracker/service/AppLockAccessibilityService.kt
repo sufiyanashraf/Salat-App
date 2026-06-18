@@ -211,14 +211,20 @@ class AppLockAccessibilityService : AccessibilityService() {
             Log.w(TAG, "Could not resolve default SMS app", e)
         }
 
-        // Resolve the default home launcher
+        // Resolve ALL home launchers (not just the default — catches Nova, Lawnchair, etc.)
         try {
             val intent = Intent(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_HOME) }
-            val launcherInfo = packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
-            launcherInfo?.activityInfo?.packageName?.let { whitelist.add(it) }
+            val launchers = packageManager.queryIntentActivities(intent, 0)
+            launchers.forEach { resolveInfo ->
+                resolveInfo.activityInfo?.packageName?.let { whitelist.add(it) }
+            }
         } catch (e: Exception) {
-            Log.w(TAG, "Could not resolve default launcher", e)
+            Log.w(TAG, "Could not query home launchers", e)
         }
+
+        // Hardcoded OEM launcher fallbacks (in case queries miss them)
+        whitelist.add("com.sec.android.app.launcher")  // Samsung
+        whitelist.add("com.miui.home")                 // Xiaomi
 
         return whitelist
     }
