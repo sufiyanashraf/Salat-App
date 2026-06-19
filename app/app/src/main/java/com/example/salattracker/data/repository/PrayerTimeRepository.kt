@@ -30,15 +30,27 @@ class PrayerTimeRepository(
         return dao.getPrayerTimesForMonth(yearMonth, lat, lng)
     }
 
-    suspend fun fetchAndCacheTodayPrayerTimes(lat: Double, lng: Double) {
+    suspend fun fetchAndCacheTodayPrayerTimes(
+        lat: Double,
+        lng: Double,
+        method: Int = 1,
+        school: Int = 0
+    ) {
         val today = LocalDate.now().format(apiDateFormatter)
-        val response = api.getTimingsByDate(today, lat, lng)
+        val response = api.getTimingsByDate(today, lat, lng, method, school)
         val entity = mapToEntity(response.data, lat, lng)
         dao.insertPrayerTimes(entity)
     }
 
-    suspend fun fetchAndCacheMonthlyPrayerTimes(year: Int, month: Int, lat: Double, lng: Double) {
-        val response = api.getTimingsForMonth(year, month, lat, lng)
+    suspend fun fetchAndCacheMonthlyPrayerTimes(
+        year: Int,
+        month: Int,
+        lat: Double,
+        lng: Double,
+        method: Int = 1,
+        school: Int = 0
+    ) {
+        val response = api.getTimingsForMonth(year, month, lat, lng, method, school)
         val entities = response.data.map { data -> mapToEntity(data, lat, lng) }
         dao.insertPrayerTimes(*entities.toTypedArray())
     }

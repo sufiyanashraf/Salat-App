@@ -23,12 +23,14 @@ class AladhanApiService {
         date: String,
         latitude: Double,
         longitude: Double,
-        method: Int = 2
+        method: Int = 1,
+        school: Int = 0
     ): AladhanResponse {
         return client.get("https://api.aladhan.com/v1/timings/$date") {
             parameter("latitude", latitude)
             parameter("longitude", longitude)
             parameter("method", method)
+            parameter("school", school)
         }.body()
     }
 
@@ -37,12 +39,14 @@ class AladhanApiService {
         month: Int,
         latitude: Double,
         longitude: Double,
-        method: Int = 2
+        method: Int = 1,
+        school: Int = 0
     ): AladhanMonthResponse {
         return client.get("https://api.aladhan.com/v1/calendar/$year/$month") {
             parameter("latitude", latitude)
             parameter("longitude", longitude)
             parameter("method", method)
+            parameter("school", school)
         }.body()
     }
 
