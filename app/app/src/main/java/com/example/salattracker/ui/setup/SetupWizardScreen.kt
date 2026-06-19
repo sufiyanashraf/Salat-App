@@ -342,7 +342,7 @@ private suspend fun fetchLocation(
             }
         }
 
-        withContext(Dispatchers.Main) {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
             locationManager.requestSingleUpdate(provider, listener, android.os.Looper.getMainLooper())
         }
 
