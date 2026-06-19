@@ -28,9 +28,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,13 +52,22 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.salattracker.data.local.SalatDatabase
+import com.example.salattracker.data.preferences.UserPreferences
+import com.example.salattracker.lock.LockManager
 import com.example.salattracker.ml.ImageClassifierHelper
+import com.example.salattracker.scheduler.DefaultPrayerAlarmScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -126,6 +137,7 @@ private fun LockContent(
     onEmergencyUnlockHold: () -> Unit,
     onVerifyClick: () -> Unit,
 ) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var holdProgress by remember { mutableStateOf(0f) }
     var holdJob by remember { mutableStateOf<Job?>(null) }
@@ -196,6 +208,47 @@ private fun LockContent(
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.padding(vertical = 4.dp),
                 )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // ── Snooze 15m button (hidden if next prayer <= 30 mins away) ──
+            var showSnooze by remember { mutableStateOf(false) }
+
+            LaunchedEffect(currentPrayer) {
+                showSnooze = try {
+                    calculateShowSnooze(context, currentPrayer)
+                } catch (e: Exception) {
+                    // If we can't determine, hide snooze to be safe
+                    false
+                }
+            }
+
+            if (showSnooze) {
+                OutlinedButton(
+                    onClick = {
+                        // Unlock and schedule a new lock alarm in 15 minutes
+                        LockManager.setLocked(false)
+                        val scheduler = DefaultPrayerAlarmScheduler(context)
+                        scheduler.scheduleExactAlarm(
+                            currentPrayer ?: "Unknown",
+                            System.currentTimeMillis() + 15 * 60 * 1000L,
+                            isLockTrigger = true
+                        )
+                    },
+                    shape = RoundedCornerShape(24.dp),
+                    modifier = Modifier.fillMaxWidth(0.7f),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = Color.White,
+                    ),
+                ) {
+                    Text(
+                        text = "Snooze 15m",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(vertical = 4.dp),
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(48.dp))
@@ -498,4 +551,68 @@ private suspend fun captureAndVerify(
             }
         })
     }
+}
+
+// ── Snooze safety check ────────────────────────────────────────────
+
+private val PRAYER_ORDER = listOf("Fajr", "Dhuhr", "Asr", "Maghrib", "Isha")
+private val TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm")
+
+/**
+ * Returns true if the "Snooze 15m" button should be shown.
+ * The button is hidden if the next prayer is <= 30 minutes away.
+ *
+ * Special case: If the current prayer is Isha (last of the day),
+ * we query tomorrow's Fajr time to determine the gap.
+ */
+private suspend fun calculateShowSnooze(
+    context: android.content.Context,
+    currentPrayer: String?
+): Boolean = withContext(Dispatchers.IO) {
+    if (currentPrayer == null) return@withContext false
+
+    val location = UserPreferences.getLocation(context).firstOrNull()
+        ?: return@withContext false
+    val (lat, lng) = location
+
+    val dao = SalatDatabase.getInstance(context).prayerTimeDao()
+    val today = LocalDate.now().toString()
+    val todayTimes = dao.getPrayerTimeByDateOnce(today, lat, lng)
+        ?: return@withContext false
+
+    val currentIndex = PRAYER_ORDER.indexOf(currentPrayer)
+    if (currentIndex == -1) return@withContext false
+
+    val now = LocalTime.now()
+
+    val nextPrayerTime: LocalTime? = if (currentIndex < PRAYER_ORDER.size - 1) {
+        // Not Isha — next prayer is today
+        val nextPrayerName = PRAYER_ORDER[currentIndex + 1]
+        val timeStr = when (nextPrayerName) {
+            "Fajr" -> todayTimes.fajr
+            "Dhuhr" -> todayTimes.dhuhr
+            "Asr" -> todayTimes.asr
+            "Maghrib" -> todayTimes.maghrib
+            "Isha" -> todayTimes.isha
+            else -> null
+        }
+        timeStr?.let { LocalTime.parse(it, TIME_FORMAT) }
+    } else {
+        // Isha — next prayer is tomorrow's Fajr
+        val tomorrow = LocalDate.now().plusDays(1).toString()
+        val tomorrowTimes = dao.getPrayerTimeByDateOnce(tomorrow, lat, lng)
+        tomorrowTimes?.fajr?.let { LocalTime.parse(it, TIME_FORMAT) }
+    }
+
+    if (nextPrayerTime == null) return@withContext false
+
+    val minutesUntilNext = if (currentIndex < PRAYER_ORDER.size - 1) {
+        ChronoUnit.MINUTES.between(now, nextPrayerTime)
+    } else {
+        // For Isha → Fajr (crosses midnight), add 24h if result is negative
+        val diff = ChronoUnit.MINUTES.between(now, nextPrayerTime)
+        if (diff < 0) diff + 24 * 60 else diff
+    }
+
+    minutesUntilNext > 30
 }
