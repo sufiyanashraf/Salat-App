@@ -12,7 +12,7 @@ interface PrayerAlarmScheduler {
      * Schedule an exact alarm that fires at [triggerAtMillis] for the given [prayerName].
      * Uses AlarmManager.setExactAndAllowWhileIdle under the hood.
      */
-    fun scheduleExactAlarm(prayerName: String, triggerAtMillis: Long)
+    fun scheduleExactAlarm(prayerName: String, triggerAtMillis: Long, isLockTrigger: Boolean = false)
 
     /**
      * Cancel a previously scheduled alarm for the given [prayerName].

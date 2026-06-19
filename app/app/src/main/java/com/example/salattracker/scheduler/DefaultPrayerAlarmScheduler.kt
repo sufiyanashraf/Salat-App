@@ -29,8 +29,8 @@ class DefaultPrayerAlarmScheduler @Inject constructor(
     private val alarmManager: AlarmManager =
         context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
-    override fun scheduleExactAlarm(prayerName: String, triggerAtMillis: Long) {
-        val pendingIntent = buildPendingIntent(prayerName)
+    override fun scheduleExactAlarm(prayerName: String, triggerAtMillis: Long, isLockTrigger: Boolean) {
+        val pendingIntent = buildPendingIntent(prayerName, isLockTrigger)
 
         alarmManager.setExactAndAllowWhileIdle(
             AlarmManager.RTC_WAKEUP,
@@ -38,11 +38,11 @@ class DefaultPrayerAlarmScheduler @Inject constructor(
             pendingIntent
         )
 
-        Log.d(TAG, "Scheduled exact alarm for $prayerName at $triggerAtMillis")
+        Log.d(TAG, "Scheduled exact alarm for $prayerName at $triggerAtMillis (isLockTrigger=$isLockTrigger)")
     }
 
     override fun cancelAlarm(prayerName: String) {
-        val pendingIntent = buildPendingIntent(prayerName)
+        val pendingIntent = buildPendingIntent(prayerName, false)
         alarmManager.cancel(pendingIntent)
         Log.d(TAG, "Cancelled alarm for $prayerName")
     }
@@ -52,15 +52,17 @@ class DefaultPrayerAlarmScheduler @Inject constructor(
         Log.d(TAG, "Cancelled all prayer alarms")
     }
 
-    private fun buildPendingIntent(prayerName: String): PendingIntent {
+    private fun buildPendingIntent(prayerName: String, isLockTrigger: Boolean = false): PendingIntent {
         val intent = Intent(context, PrayerAlarmReceiver::class.java).apply {
             putExtra("PRAYER_NAME", prayerName)
+            putExtra("IS_LOCK_TRIGGER", isLockTrigger)
         }
         return PendingIntent.getBroadcast(
             context,
-            prayerName.hashCode(),
+            prayerName.hashCode() + isLockTrigger.hashCode(),
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
     }
 }
+
