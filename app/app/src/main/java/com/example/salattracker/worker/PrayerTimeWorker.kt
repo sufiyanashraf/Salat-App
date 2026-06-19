@@ -5,10 +5,12 @@ import android.util.Log
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.example.salattracker.data.preferences.UserPreferences
 import com.example.salattracker.data.repository.PrayerTimeRepository
 import com.example.salattracker.scheduler.PrayerAlarmScheduler
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import kotlinx.coroutines.flow.firstOrNull
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -20,8 +22,8 @@ import java.time.format.DateTimeFormatter
  * for each remaining prayer. Runs daily via PeriodicWorkRequest and
  * on-demand after device boot via BootReceiver.
  *
- * Hard-coded coordinates (Islamabad, Pakistan) are used until location
- * services are implemented in a future phase.
+ * Reads the user's saved location from DataStore. If no location is
+ * available, the worker fails gracefully and retries later.
  */
 @HiltWorker
 class PrayerTimeWorker @AssistedInject constructor(
@@ -34,10 +36,6 @@ class PrayerTimeWorker @AssistedInject constructor(
     companion object {
         private const val TAG = "PrayerTimeWorker"
         const val WORK_NAME = "prayer_time_sync"
-
-        // Hard-coded location (Islamabad) until location phase
-        private const val DEFAULT_LAT = 33.6844
-        private const val DEFAULT_LNG = 73.0479
 
         private val TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm")
 
@@ -54,12 +52,21 @@ class PrayerTimeWorker @AssistedInject constructor(
         return try {
             Log.d(TAG, "Starting prayer time sync")
 
+            // Read location from DataStore — fail gracefully if not set
+            val location = UserPreferences.getLocation(applicationContext).firstOrNull()
+            if (location == null) {
+                Log.e(TAG, "No location saved — user must complete setup first")
+                return Result.failure()
+            }
+            val (lat, lng) = location
+            Log.d(TAG, "Using location: lat=$lat, lng=$lng")
+
             // Try to get cached times first, fetch from network if missing
-            var entity = repository.getTodayPrayerTimesOnce(DEFAULT_LAT, DEFAULT_LNG)
+            var entity = repository.getTodayPrayerTimesOnce(lat, lng)
             if (entity == null) {
                 Log.d(TAG, "No cached times found, fetching from network")
-                repository.fetchAndCacheTodayPrayerTimes(DEFAULT_LAT, DEFAULT_LNG)
-                entity = repository.getTodayPrayerTimesOnce(DEFAULT_LAT, DEFAULT_LNG)
+                repository.fetchAndCacheTodayPrayerTimes(lat, lng)
+                entity = repository.getTodayPrayerTimesOnce(lat, lng)
             }
 
             if (entity == null) {
