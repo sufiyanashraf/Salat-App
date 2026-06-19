@@ -3,6 +3,7 @@ package com.example.salattracker.ui.setup
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.Geocoder
 import android.location.LocationManager
 import android.net.Uri
 import android.os.PowerManager
@@ -129,7 +130,8 @@ fun SetupWizardScreen(onFinish: () -> Unit) {
                 try {
                     val location = fetchLocation(context)
                     if (location != null) {
-                        UserPreferences.saveLocation(context, location.first, location.second)
+                        val locationName = reverseGeocode(context, location.first, location.second)
+                        UserPreferences.saveLocation(context, location.first, location.second, locationName)
                         isLocationSaved = true
                         // Kick off worker to fetch prayer times for this location
                         val workRequest = OneTimeWorkRequestBuilder<PrayerTimeWorker>().build()
@@ -255,7 +257,8 @@ fun SetupWizardScreen(onFinish: () -> Unit) {
                         try {
                             val location = fetchLocation(context)
                             if (location != null) {
-                                UserPreferences.saveLocation(context, location.first, location.second)
+                                val locationName = reverseGeocode(context, location.first, location.second)
+                                UserPreferences.saveLocation(context, location.first, location.second, locationName)
                                 isLocationSaved = true
                                 val workRequest = OneTimeWorkRequestBuilder<PrayerTimeWorker>().build()
                                 WorkManager.getInstance(context).enqueueUniqueWork(
@@ -349,6 +352,23 @@ private suspend fun fetchLocation(
         continuation.invokeOnCancellation {
             locationManager.removeUpdates(listener)
         }
+    }
+}
+
+// ── Reverse geocoder ──
+
+private fun reverseGeocode(context: android.content.Context, lat: Double, lng: Double): String? {
+    return try {
+        @Suppress("DEPRECATION")
+        val addresses = Geocoder(context, java.util.Locale.getDefault()).getFromLocation(lat, lng, 1)
+        if (!addresses.isNullOrEmpty()) {
+            val addr = addresses[0]
+            val city = addr.locality ?: addr.subAdminArea ?: addr.adminArea
+            val country = addr.countryName
+            listOfNotNull(city, country).joinToString(", ")
+        } else null
+    } catch (e: Exception) {
+        null
     }
 }
 
