@@ -2,6 +2,7 @@ package com.example.salattracker.ui.main
 
 import android.os.PowerManager
 import android.provider.Settings
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -23,6 +24,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -48,10 +50,16 @@ import com.example.salattracker.SetupWizard
 import com.example.salattracker.data.local.PrayerTimeEntity
 import com.example.salattracker.data.local.SalatDatabase
 import com.example.salattracker.data.preferences.UserPreferences
+import com.example.salattracker.data.remote.AladhanApiService
+import com.example.salattracker.data.repository.PrayerTimeRepository
 import com.example.salattracker.lock.LockManager
 import com.example.salattracker.scheduler.DefaultPrayerAlarmScheduler
+import com.example.salattracker.worker.PrayerTimeWorker
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.withContext
+import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
@@ -83,8 +91,9 @@ fun MainScreen(
     var isLoading by remember { mutableStateOf(true) }
     var nextPrayer by remember { mutableStateOf<String?>(null) }
     var minutesUntilNext by remember { mutableLongStateOf(0L) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    // ── Check required settings and redirect to setup wizard if missing ──
+    // ── Check required settings, then load/fetch prayer times ──
     LaunchedEffect(Unit) {
         val pm = context.getSystemService(PowerManager::class.java)
         val isBatteryOptimized = pm?.isIgnoringBatteryOptimizations(context.packageName) == true
@@ -102,11 +111,56 @@ fun MainScreen(
             return@LaunchedEffect
         }
 
-        // Load prayer times from the local DB
         val (lat, lng) = location
         val dao = SalatDatabase.getInstance(context).prayerTimeDao()
-        val today = java.time.LocalDate.now().toString()
-        prayerTimes = dao.getPrayerTimeByDateOnce(today, lat, lng)
+        val today = LocalDate.now().toString()
+
+        // Step 1: Try local DB first
+        var entity = withContext(Dispatchers.IO) {
+            dao.getPrayerTimeByDateOnce(today, lat, lng)
+        }
+
+        // Step 2: If not in DB, fetch directly from API
+        if (entity == null) {
+            Log.d("MainScreen", "No cached prayer times, fetching from API...")
+            try {
+                val api = AladhanApiService()
+                val repo = PrayerTimeRepository(dao, api)
+                withContext(Dispatchers.IO) {
+                    repo.fetchAndCacheTodayPrayerTimes(lat, lng)
+                    entity = dao.getPrayerTimeByDateOnce(today, lat, lng)
+                }
+                api.close()
+            } catch (e: Exception) {
+                Log.e("MainScreen", "Failed to fetch prayer times", e)
+                errorMessage = "Could not fetch prayer times. Check your internet connection."
+            }
+        }
+
+        // Step 3: Also schedule alarms for any remaining prayers
+        if (entity != null) {
+            try {
+                val scheduler = DefaultPrayerAlarmScheduler(context)
+                val now = java.time.LocalDateTime.now()
+                val todayDate = LocalDate.now()
+                val zone = java.time.ZoneId.systemDefault()
+
+                for (name in PRAYER_ORDER) {
+                    val timeStr = getPrayerTime(entity!!, name) ?: continue
+                    val prayerTime = LocalTime.parse(timeStr, TIME_FORMAT)
+                    val prayerDateTime = java.time.LocalDateTime.of(todayDate, prayerTime)
+
+                    if (prayerDateTime.isAfter(now)) {
+                        val triggerMillis = prayerDateTime.atZone(zone).toInstant().toEpochMilli()
+                        scheduler.scheduleExactAlarm(name, triggerMillis)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("MainScreen", "Failed to schedule alarms", e)
+            }
+        }
+
+        prayerTimes = entity
         isLoading = false
     }
 
@@ -152,7 +206,7 @@ fun MainScreen(
             color = MaterialTheme.colorScheme.onBackground
         )
         Text(
-            text = java.time.LocalDate.now().format(
+            text = LocalDate.now().format(
                 DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy")
             ),
             style = MaterialTheme.typography.bodyMedium,
@@ -253,6 +307,8 @@ fun MainScreen(
 
         // ── Prayer Times List ──
         if (isLoading) {
+            CircularProgressIndicator()
+            Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = "Loading prayer times…",
                 style = MaterialTheme.typography.bodyLarge,
@@ -260,7 +316,7 @@ fun MainScreen(
             )
         } else if (prayerTimes == null) {
             Text(
-                text = "No prayer times available.\nOpen the app to sync.",
+                text = errorMessage ?: "No prayer times available.\nCheck your internet and restart the app.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.error,
                 textAlign = TextAlign.Center
@@ -335,7 +391,6 @@ fun MainScreen(
         // ── Test Lock Screen button ──
         Button(
             onClick = {
-                // Use isLockTrigger=true to bypass the 15-min silent delay
                 LockManager.setLocked(true, "Test")
                 Toast.makeText(context, "Lock screen triggered!", Toast.LENGTH_SHORT).show()
             },

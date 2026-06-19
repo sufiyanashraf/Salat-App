@@ -212,15 +212,15 @@ private fun LockContent(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // ── Snooze 15m button (hidden if next prayer <= 30 mins away) ──
-            var showSnooze by remember { mutableStateOf(false) }
+            // ── Snooze 15m button (hidden only if next prayer <= 30 mins away) ──
+            var showSnooze by remember { mutableStateOf(true) }
 
             LaunchedEffect(currentPrayer) {
                 showSnooze = try {
                     calculateShowSnooze(context, currentPrayer)
                 } catch (e: Exception) {
-                    // If we can't determine, hide snooze to be safe
-                    false
+                    // If we can't determine next prayer time, show snooze to be safe
+                    true
                 }
             }
 
