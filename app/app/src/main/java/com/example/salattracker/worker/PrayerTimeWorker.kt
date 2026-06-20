@@ -61,11 +61,16 @@ class PrayerTimeWorker @AssistedInject constructor(
             val (lat, lng) = location
             Log.d(TAG, "Using location: lat=$lat, lng=$lng")
 
+            // Read user's calculation preferences
+            val method = UserPreferences.getCalculationMethod(applicationContext).firstOrNull() ?: 1
+            val school = UserPreferences.getAsrSchool(applicationContext).firstOrNull() ?: 0
+            Log.d(TAG, "Using method=$method, school=$school")
+
             // Try to get cached times first, fetch from network if missing
             var entity = repository.getTodayPrayerTimesOnce(lat, lng)
             if (entity == null) {
                 Log.d(TAG, "No cached times found, fetching from network")
-                repository.fetchAndCacheTodayPrayerTimes(lat, lng)
+                repository.fetchAndCacheTodayPrayerTimes(lat, lng, method, school)
                 entity = repository.getTodayPrayerTimesOnce(lat, lng)
             }
 
