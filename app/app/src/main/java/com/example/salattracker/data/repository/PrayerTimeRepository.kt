@@ -68,6 +68,7 @@ class PrayerTimeRepository(
         return PrayerTimeEntity(
             date = dbDate,
             fajr = extractTime(data.timings.Fajr),
+            sunrise = extractTime(data.timings.Sunrise),
             dhuhr = extractTime(data.timings.Dhuhr),
             asr = extractTime(data.timings.Asr),
             maghrib = extractTime(data.timings.Maghrib),

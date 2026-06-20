@@ -5,7 +5,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [PrayerTimeEntity::class], version = 1, exportSchema = false)
+@Database(entities = [PrayerTimeEntity::class], version = 2, exportSchema = false)
 abstract class SalatDatabase : RoomDatabase() {
 
     abstract fun prayerTimeDao(): PrayerTimeDao
@@ -20,7 +20,8 @@ abstract class SalatDatabase : RoomDatabase() {
                     context.applicationContext,
                     SalatDatabase::class.java,
                     "salat_database"
-                ).build().also { INSTANCE = it }
+                ).fallbackToDestructiveMigration()
+                 .build().also { INSTANCE = it }
             }
         }
     }

@@ -13,6 +13,7 @@ data class PrayerTimeEntity(
     val id: Long = 0,
     val date: String,       // "yyyy-MM-dd"
     val fajr: String,       // "HH:mm"
+    val sunrise: String,    // "HH:mm" — not a prayer, marks end of Fajr window
     val dhuhr: String,      // "HH:mm"
     val asr: String,        // "HH:mm"
     val maghrib: String,    // "HH:mm"
