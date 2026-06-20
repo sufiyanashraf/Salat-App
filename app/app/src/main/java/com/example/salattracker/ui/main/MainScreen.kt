@@ -26,6 +26,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -45,7 +47,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.painterResource
 import androidx.navigation3.runtime.NavKey
+import com.example.salattracker.R
+import com.example.salattracker.Settings
 import com.example.salattracker.SetupWizard
 import com.example.salattracker.data.local.PrayerTimeEntity
 import com.example.salattracker.data.local.SalatDatabase
@@ -92,6 +97,7 @@ fun MainScreen(
     var nextPrayer by remember { mutableStateOf<String?>(null) }
     var minutesUntilNext by remember { mutableLongStateOf(0L) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var locationName by remember { mutableStateOf<String?>(null) }
 
     // ── Check required settings, then load/fetch prayer times ──
     LaunchedEffect(Unit) {
@@ -105,6 +111,7 @@ fun MainScreen(
         val isAccessibilityEnabled = enabledServices?.contains(context.packageName) == true
 
         val location = UserPreferences.getLocation(context).firstOrNull()
+        locationName = UserPreferences.getLocationName(context).firstOrNull()
 
         if (!isBatteryOptimized || !isAccessibilityEnabled || location == null) {
             onItemClick(SetupWizard)
@@ -124,10 +131,12 @@ fun MainScreen(
         if (entity == null) {
             Log.d("MainScreen", "No cached prayer times, fetching from API...")
             try {
+                val method = UserPreferences.getCalculationMethod(context).firstOrNull() ?: 1
+                val school = UserPreferences.getAsrSchool(context).firstOrNull() ?: 0
                 val api = AladhanApiService()
                 val repo = PrayerTimeRepository(dao, api)
                 withContext(Dispatchers.IO) {
-                    repo.fetchAndCacheTodayPrayerTimes(lat, lng)
+                    repo.fetchAndCacheTodayPrayerTimes(lat, lng, method, school)
                     entity = dao.getPrayerTimeByDateOnce(today, lat, lng)
                 }
                 api.close()
@@ -198,20 +207,41 @@ fun MainScreen(
     ) {
         Spacer(modifier = Modifier.height(16.dp))
 
-        // ── Header ──
-        Text(
-            text = "Salat Tracker",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onBackground
-        )
-        Text(
-            text = LocalDate.now().format(
-                DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy")
-            ),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        // ── Header with settings icon ──
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = "Salat Tracker",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                Text(
+                    text = LocalDate.now().format(
+                        DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy")
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (locationName != null) {
+                    Text(
+                        text = "\uD83D\uDCCD $locationName",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+            IconButton(onClick = { onItemClick(Settings) }) {
+                Text(
+                    text = "\u2699\uFE0F",
+                    fontSize = 24.sp
+                )
+            }
+        }
 
         Spacer(modifier = Modifier.height(24.dp))
 
