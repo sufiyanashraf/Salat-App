@@ -9,6 +9,7 @@ import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
 import com.example.salattracker.ui.main.MainScreen
+import com.example.salattracker.ui.settings.SettingsScreen
 import com.example.salattracker.ui.setup.SetupWizardScreen
 
 @Composable
@@ -25,6 +26,9 @@ fun MainNavigation() {
         }
         entry<SetupWizard> {
           SetupWizardScreen(onFinish = { backStack.removeLastOrNull() })
+        }
+        entry<Settings> {
+          SettingsScreen(onBack = { backStack.removeLastOrNull() })
         }
       },
   )
