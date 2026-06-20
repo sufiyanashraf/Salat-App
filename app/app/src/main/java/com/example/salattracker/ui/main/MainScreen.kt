@@ -50,7 +50,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.painterResource
 import androidx.navigation3.runtime.NavKey
 import com.example.salattracker.R
-import com.example.salattracker.Settings
+import com.example.salattracker.Settings as SettingsNav
 import com.example.salattracker.SetupWizard
 import com.example.salattracker.data.local.PrayerTimeEntity
 import com.example.salattracker.data.local.SalatDatabase
@@ -235,7 +235,7 @@ fun MainScreen(
                     )
                 }
             }
-            IconButton(onClick = { onItemClick(Settings) }) {
+            IconButton(onClick = { onItemClick(SettingsNav) }) {
                 Text(
                     text = "\u2699\uFE0F",
                     fontSize = 24.sp
