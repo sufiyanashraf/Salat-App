@@ -569,7 +569,7 @@ private suspend fun calculateShowSnooze(
     context: android.content.Context,
     currentPrayer: String?
 ): Boolean = withContext(Dispatchers.IO) {
-    if (currentPrayer == null) return@withContext false
+    if (currentPrayer == null) return@withContext true
 
     val location = UserPreferences.getLocation(context).firstOrNull()
         ?: return@withContext false
@@ -581,7 +581,8 @@ private suspend fun calculateShowSnooze(
         ?: return@withContext false
 
     val currentIndex = PRAYER_ORDER.indexOf(currentPrayer)
-    if (currentIndex == -1) return@withContext false
+    // "Test" or unrecognized prayer — default to showing snooze
+    if (currentIndex == -1) return@withContext true
 
     val now = LocalTime.now()
 
