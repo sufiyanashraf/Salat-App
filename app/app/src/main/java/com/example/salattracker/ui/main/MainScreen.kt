@@ -1,5 +1,6 @@
 package com.example.salattracker.ui.main
 
+import android.location.Geocoder
 import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
@@ -26,7 +27,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -47,9 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.res.painterResource
 import androidx.navigation3.runtime.NavKey
-import com.example.salattracker.R
 import com.example.salattracker.Settings as SettingsNav
 import com.example.salattracker.SetupWizard
 import com.example.salattracker.data.local.PrayerTimeEntity
@@ -59,7 +57,6 @@ import com.example.salattracker.data.remote.AladhanApiService
 import com.example.salattracker.data.repository.PrayerTimeRepository
 import com.example.salattracker.lock.LockManager
 import com.example.salattracker.scheduler.DefaultPrayerAlarmScheduler
-import com.example.salattracker.worker.PrayerTimeWorker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.firstOrNull
@@ -81,8 +78,22 @@ private val prayerColors = mapOf(
     "Isha"    to PrayerColor(Color(0xFF0D47A1), Color(0xFF1A237E)),
 )
 
+// Full display order including Sunrise (not a prayer)
+private val DISPLAY_ORDER = listOf("Fajr", "Sunrise", "Dhuhr", "Asr", "Maghrib", "Isha")
+// Only actual prayers (for alarm scheduling)
 private val PRAYER_ORDER = listOf("Fajr", "Dhuhr", "Asr", "Maghrib", "Isha")
 private val TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm")
+private const val GRACE_PERIOD_MINUTES = 15L
+
+// ── Hero card state ──
+private enum class HeroState { GRACE, ACTIVE, WAITING, ALL_DONE }
+private data class HeroInfo(
+    val state: HeroState,
+    val prayerName: String = "",
+    val timeStr: String = "",
+    val countdownMinutes: Long = 0,
+    val countdownLabel: String = ""
+)
 
 @Composable
 fun MainScreen(
@@ -94,8 +105,7 @@ fun MainScreen(
     // ── State ──
     var prayerTimes by remember { mutableStateOf<PrayerTimeEntity?>(null) }
     var isLoading by remember { mutableStateOf(true) }
-    var nextPrayer by remember { mutableStateOf<String?>(null) }
-    var minutesUntilNext by remember { mutableLongStateOf(0L) }
+    var heroInfo by remember { mutableStateOf(HeroInfo(HeroState.WAITING)) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var locationName by remember { mutableStateOf<String?>(null) }
 
@@ -111,7 +121,6 @@ fun MainScreen(
         val isAccessibilityEnabled = enabledServices?.contains(context.packageName) == true
 
         val location = UserPreferences.getLocation(context).firstOrNull()
-        locationName = UserPreferences.getLocationName(context).firstOrNull()
 
         if (!isBatteryOptimized || !isAccessibilityEnabled || location == null) {
             onItemClick(SetupWizard)
@@ -119,6 +128,33 @@ fun MainScreen(
         }
 
         val (lat, lng) = location
+
+        // Location name fallback: if missing, reverse geocode now
+        val savedName = UserPreferences.getLocationName(context).firstOrNull()
+        if (savedName != null) {
+            locationName = savedName
+        } else {
+            try {
+                val name = withContext(Dispatchers.IO) {
+                    @Suppress("DEPRECATION")
+                    val addresses = Geocoder(context, java.util.Locale.getDefault())
+                        .getFromLocation(lat, lng, 1)
+                    if (!addresses.isNullOrEmpty()) {
+                        val addr = addresses[0]
+                        val city = addr.locality ?: addr.subAdminArea ?: addr.adminArea
+                        val country = addr.countryName
+                        listOfNotNull(city, country).joinToString(", ")
+                    } else null
+                }
+                if (name != null) {
+                    locationName = name
+                    UserPreferences.saveLocation(context, lat, lng, name)
+                }
+            } catch (e: Exception) {
+                Log.e("MainScreen", "Reverse geocode failed", e)
+            }
+        }
+
         val dao = SalatDatabase.getInstance(context).prayerTimeDao()
         val today = LocalDate.now().toString()
 
@@ -146,7 +182,7 @@ fun MainScreen(
             }
         }
 
-        // Step 3: Also schedule alarms for any remaining prayers
+        // Step 3: Schedule alarms for remaining prayers
         if (entity != null) {
             try {
                 val scheduler = DefaultPrayerAlarmScheduler(context)
@@ -155,7 +191,7 @@ fun MainScreen(
                 val zone = java.time.ZoneId.systemDefault()
 
                 for (name in PRAYER_ORDER) {
-                    val timeStr = getPrayerTime(entity!!, name) ?: continue
+                    val timeStr = getTimeFromEntity(entity!!, name) ?: continue
                     val prayerTime = LocalTime.parse(timeStr, TIME_FORMAT)
                     val prayerDateTime = java.time.LocalDateTime.of(todayDate, prayerTime)
 
@@ -173,27 +209,12 @@ fun MainScreen(
         isLoading = false
     }
 
-    // ── Live countdown ticker ──
+    // ── Live countdown ticker — calculates the 3-state hero info ──
     LaunchedEffect(prayerTimes) {
         val entity = prayerTimes ?: return@LaunchedEffect
         while (true) {
-            val now = LocalTime.now()
-            var found = false
-            for (name in PRAYER_ORDER) {
-                val timeStr = getPrayerTime(entity, name) ?: continue
-                val prayerTime = LocalTime.parse(timeStr, TIME_FORMAT)
-                if (prayerTime.isAfter(now)) {
-                    nextPrayer = name
-                    minutesUntilNext = ChronoUnit.MINUTES.between(now, prayerTime)
-                    found = true
-                    break
-                }
-            }
-            if (!found) {
-                nextPrayer = null
-                minutesUntilNext = 0
-            }
-            delay(30_000) // refresh every 30 seconds
+            heroInfo = calculateHeroInfo(entity)
+            delay(15_000) // refresh every 15 seconds for accurate countdowns
         }
     }
 
@@ -245,97 +266,171 @@ fun MainScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // ── Next Prayer Hero Card ──
-        if (nextPrayer != null) {
-            val colors = prayerColors[nextPrayer] ?: PrayerColor(Color(0xFF1B5E20), Color(0xFF2E7D32))
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.Transparent)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            Brush.horizontalGradient(listOf(colors.start, colors.end)),
-                            RoundedCornerShape(20.dp)
-                        )
-                        .padding(24.dp)
+        // ── Hero Card ──
+        when (heroInfo.state) {
+            HeroState.GRACE -> {
+                // Grace period: prayer just started, lock coming in X minutes
+                val colors = prayerColors[heroInfo.prayerName]
+                    ?: PrayerColor(Color(0xFF1B5E20), Color(0xFF2E7D32))
+                HeroCard(
+                    gradientStart = colors.start,
+                    gradientEnd = colors.end,
                 ) {
-                    Column {
+                    Text(
+                        text = "PRAYER TIME",
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 3.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = heroInfo.prayerName,
+                        color = Color.White,
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.Bottom) {
                         Text(
-                            text = "NEXT PRAYER",
-                            color = Color.White.copy(alpha = 0.6f),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 3.sp
+                            text = heroInfo.timeStr,
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Medium
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = nextPrayer ?: "",
-                            color = Color.White,
-                            fontSize = 32.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-
-                        val entity = prayerTimes
-                        val timeStr = if (entity != null && nextPrayer != null)
-                            getPrayerTime(entity, nextPrayer!!) else null
-
-                        Row(verticalAlignment = Alignment.Bottom) {
-                            if (timeStr != null) {
-                                Text(
-                                    text = timeStr,
-                                    color = Color.White.copy(alpha = 0.8f),
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                            }
-                            Text(
-                                text = if (minutesUntilNext > 60)
-                                    "${minutesUntilNext / 60}h ${minutesUntilNext % 60}m left"
-                                else
-                                    "${minutesUntilNext}m left",
-                                color = Color.White.copy(alpha = 0.6f),
-                                fontSize = 14.sp
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .background(
+                                Color.Red.copy(alpha = 0.25f),
+                                RoundedCornerShape(8.dp)
                             )
-                        }
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = "⚠\uFE0F  Screen locks in ${heroInfo.countdownLabel}",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                 }
             }
-        } else if (!isLoading && prayerTimes != null) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                )
-            ) {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+
+            HeroState.ACTIVE -> {
+                // Active prayer period: lock has triggered, counting down to next boundary
+                val colors = prayerColors[heroInfo.prayerName]
+                    ?: PrayerColor(Color(0xFF1B5E20), Color(0xFF2E7D32))
+                HeroCard(
+                    gradientStart = colors.start,
+                    gradientEnd = colors.end,
                 ) {
                     Text(
-                        text = "All prayers completed ✓",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary
+                        text = "ACTIVE PRAYER",
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 3.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = heroInfo.prayerName,
+                        color = Color.White,
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text(
+                            text = heroInfo.timeStr,
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "Ends in ${heroInfo.countdownLabel}",
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            }
+
+            HeroState.WAITING -> {
+                // Waiting for next prayer
+                val colors = prayerColors[heroInfo.prayerName]
+                    ?: PrayerColor(Color(0xFF1B5E20), Color(0xFF2E7D32))
+                HeroCard(
+                    gradientStart = colors.start,
+                    gradientEnd = colors.end,
+                ) {
                     Text(
-                        text = "MashaAllah! See you tomorrow.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = "NEXT PRAYER",
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 3.sp
                     )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = heroInfo.prayerName,
+                        color = Color.White,
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text(
+                            text = heroInfo.timeStr,
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "Starts in ${heroInfo.countdownLabel}",
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            }
+
+            HeroState.ALL_DONE -> {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "All prayers completed ✓",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "MashaAllah! See you tomorrow.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // ── Prayer Times List ──
+        // ── Prayer Times List (with Sunrise) ──
         if (isLoading) {
             CircularProgressIndicator()
             Spacer(modifier = Modifier.height(8.dp))
@@ -361,22 +456,27 @@ fun MainScreen(
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     val now = LocalTime.now()
-                    PRAYER_ORDER.forEachIndexed { index, name ->
-                        val timeStr = getPrayerTime(prayerTimes!!, name)
+                    DISPLAY_ORDER.forEachIndexed { index, name ->
+                        val timeStr = getTimeFromEntity(prayerTimes!!, name)
                         val prayerTime = timeStr?.let { LocalTime.parse(it, TIME_FORMAT) }
                         val isPast = prayerTime?.isBefore(now) == true
-                        val isNext = name == nextPrayer
-                        val colors = prayerColors[name]
+                        val isSunrise = name == "Sunrise"
+                        val isActive = name == heroInfo.prayerName &&
+                            (heroInfo.state == HeroState.GRACE || heroInfo.state == HeroState.ACTIVE)
+                        val isNext = name == heroInfo.prayerName && heroInfo.state == HeroState.WAITING
+                        val dotColor = prayerColors[name]?.start
 
                         PrayerTimeRow(
                             name = name,
                             time = timeStr ?: "--:--",
                             isPast = isPast,
+                            isActive = isActive,
                             isNext = isNext,
-                            dotColor = colors?.start ?: MaterialTheme.colorScheme.primary
+                            isSunrise = isSunrise,
+                            dotColor = dotColor ?: MaterialTheme.colorScheme.primary
                         )
 
-                        if (index < PRAYER_ORDER.size - 1) {
+                        if (index < DISPLAY_ORDER.size - 1) {
                             HorizontalDivider(
                                 modifier = Modifier.padding(vertical = 8.dp),
                                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
@@ -437,14 +537,43 @@ fun MainScreen(
     }
 }
 
-// ── Helper composables ──
+// ── Reusable Hero Card ──
+
+@Composable
+private fun HeroCard(
+    gradientStart: Color,
+    gradientEnd: Color,
+    content: @Composable () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.horizontalGradient(listOf(gradientStart, gradientEnd)),
+                    RoundedCornerShape(20.dp)
+                )
+                .padding(24.dp)
+        ) {
+            Column { content() }
+        }
+    }
+}
+
+// ── Prayer Time Row (updated for sunrise) ──
 
 @Composable
 private fun PrayerTimeRow(
     name: String,
     time: String,
     isPast: Boolean,
+    isActive: Boolean,
     isNext: Boolean,
+    isSunrise: Boolean,
     dotColor: Color
 ) {
     Row(
@@ -455,22 +584,36 @@ private fun PrayerTimeRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .size(if (isNext) 12.dp else 8.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (isPast) dotColor.copy(alpha = 0.3f)
-                        else dotColor
-                    )
-            )
-            Spacer(modifier = Modifier.width(12.dp))
+            if (isSunrise) {
+                // Sun icon instead of dot
+                Text(
+                    text = "☀\uFE0F",
+                    fontSize = 14.sp,
+                    modifier = Modifier.width(16.dp)
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(if (isActive || isNext) 12.dp else 8.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (isPast) dotColor.copy(alpha = 0.3f)
+                            else dotColor
+                        )
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+            }
+            Spacer(modifier = Modifier.width(8.dp))
             Text(
                 text = name,
                 style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (isNext) FontWeight.Bold else FontWeight.Normal,
+                fontWeight = if (isActive || isNext) FontWeight.Bold
+                    else if (isSunrise) FontWeight.Light
+                    else FontWeight.Normal,
                 color = if (isPast)
                     MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                else if (isSunrise)
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                 else
                     MaterialTheme.colorScheme.onSurface
             )
@@ -478,22 +621,131 @@ private fun PrayerTimeRow(
         Text(
             text = time,
             style = MaterialTheme.typography.bodyLarge,
-            fontWeight = if (isNext) FontWeight.Bold else FontWeight.Normal,
+            fontWeight = if (isActive || isNext) FontWeight.Bold
+                else if (isSunrise) FontWeight.Light
+                else FontWeight.Normal,
             color = if (isPast)
                 MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+            else if (isActive)
+                dotColor
             else if (isNext)
                 dotColor
+            else if (isSunrise)
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
             else
                 MaterialTheme.colorScheme.onSurface
         )
     }
 }
 
+// ── Core hero calculation logic ──
+
+/**
+ * Determines the hero card state based on the current time and prayer schedule.
+ *
+ * Time windows:
+ * - [Prayer Start] to [Prayer Start + 15 min] → GRACE (lock warning)
+ * - [Prayer Start + 15 min] to [Next Boundary] → ACTIVE (prayer active, counting down to end)
+ * - [Next Boundary] to [Next Prayer Start] → WAITING (counting down to next prayer)
+ *
+ * Boundaries:
+ * - Fajr ends at Sunrise
+ * - Dhuhr ends at Asr
+ * - Asr ends at Maghrib
+ * - Maghrib ends at Isha
+ * - Isha ends at midnight (23:59)
+ */
+private fun calculateHeroInfo(entity: PrayerTimeEntity): HeroInfo {
+    val now = LocalTime.now()
+
+    // Build time pairs: (prayerName, startTime, endTime)
+    data class PrayerWindow(
+        val name: String,
+        val start: LocalTime,
+        val end: LocalTime
+    )
+
+    val fajr = LocalTime.parse(entity.fajr, TIME_FORMAT)
+    val sunrise = LocalTime.parse(entity.sunrise, TIME_FORMAT)
+    val dhuhr = LocalTime.parse(entity.dhuhr, TIME_FORMAT)
+    val asr = LocalTime.parse(entity.asr, TIME_FORMAT)
+    val maghrib = LocalTime.parse(entity.maghrib, TIME_FORMAT)
+    val isha = LocalTime.parse(entity.isha, TIME_FORMAT)
+
+    val windows = listOf(
+        PrayerWindow("Fajr", fajr, sunrise),
+        PrayerWindow("Dhuhr", dhuhr, asr),
+        PrayerWindow("Asr", asr, maghrib),
+        PrayerWindow("Maghrib", maghrib, isha),
+        PrayerWindow("Isha", isha, LocalTime.of(23, 59)),
+    )
+
+    // Check each prayer window
+    for (window in windows) {
+        val graceEnd = window.start.plusMinutes(GRACE_PERIOD_MINUTES)
+
+        if (!now.isBefore(window.start) && now.isBefore(graceEnd)) {
+            // GRACE period
+            val mins = ChronoUnit.MINUTES.between(now, graceEnd)
+            return HeroInfo(
+                state = HeroState.GRACE,
+                prayerName = window.name,
+                timeStr = window.start.format(TIME_FORMAT),
+                countdownMinutes = mins,
+                countdownLabel = formatCountdown(mins)
+            )
+        }
+
+        if (!now.isBefore(graceEnd) && now.isBefore(window.end)) {
+            // ACTIVE period
+            val mins = ChronoUnit.MINUTES.between(now, window.end)
+            return HeroInfo(
+                state = HeroState.ACTIVE,
+                prayerName = window.name,
+                timeStr = window.start.format(TIME_FORMAT),
+                countdownMinutes = mins,
+                countdownLabel = formatCountdown(mins)
+            )
+        }
+    }
+
+    // Not inside any window — find next upcoming prayer
+    val allPrayers = listOf(
+        "Fajr" to fajr,
+        "Dhuhr" to dhuhr,
+        "Asr" to asr,
+        "Maghrib" to maghrib,
+        "Isha" to isha,
+    )
+
+    for ((name, time) in allPrayers) {
+        if (time.isAfter(now)) {
+            val mins = ChronoUnit.MINUTES.between(now, time)
+            return HeroInfo(
+                state = HeroState.WAITING,
+                prayerName = name,
+                timeStr = time.format(TIME_FORMAT),
+                countdownMinutes = mins,
+                countdownLabel = formatCountdown(mins)
+            )
+        }
+    }
+
+    // All prayers are past
+    return HeroInfo(state = HeroState.ALL_DONE)
+}
+
+private fun formatCountdown(minutes: Long): String {
+    return if (minutes > 60) "${minutes / 60}h ${minutes % 60}m"
+    else "${minutes}m"
+}
+
 // ── Helpers ──
 
-private fun getPrayerTime(entity: PrayerTimeEntity, name: String): String? {
+private fun getTimeFromEntity(entity: PrayerTimeEntity, name: String): String? {
     return when (name) {
         "Fajr" -> entity.fajr
+        "Sunrise" -> entity.sunrise
         "Dhuhr" -> entity.dhuhr
         "Asr" -> entity.asr
         "Maghrib" -> entity.maghrib
