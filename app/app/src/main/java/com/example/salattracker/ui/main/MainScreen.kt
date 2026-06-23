@@ -84,6 +84,7 @@ private val DISPLAY_ORDER = listOf("Fajr", "Sunrise", "Dhuhr", "Asr", "Maghrib",
 private val PRAYER_ORDER = listOf("Fajr", "Dhuhr", "Asr", "Maghrib", "Isha")
 private val TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm")
 private const val GRACE_PERIOD_MINUTES = 15L
+private const val NEXT_PRAYER_BUFFER_MINUTES = 30L
 
 // ── Hero card state ──
 private enum class HeroState { GRACE, ACTIVE, WAITING, ALL_DONE }
@@ -182,24 +183,12 @@ fun MainScreen(
             }
         }
 
-        // Step 3: Schedule alarms for remaining prayers
+        // Step 3: Intelligently schedule alarms for all prayers
         if (entity != null) {
             try {
                 val scheduler = DefaultPrayerAlarmScheduler(context)
-                val now = java.time.LocalDateTime.now()
-                val todayDate = LocalDate.now()
-                val zone = java.time.ZoneId.systemDefault()
-
-                for (name in PRAYER_ORDER) {
-                    val timeStr = getTimeFromEntity(entity!!, name) ?: continue
-                    val prayerTime = LocalTime.parse(timeStr, TIME_FORMAT)
-                    val prayerDateTime = java.time.LocalDateTime.of(todayDate, prayerTime)
-
-                    if (prayerDateTime.isAfter(now)) {
-                        val triggerMillis = prayerDateTime.atZone(zone).toInstant().toEpochMilli()
-                        scheduler.scheduleExactAlarm(name, triggerMillis)
-                    }
-                }
+                val count = scheduler.scheduleAllAlarmsForToday(entity!!)
+                Log.d("MainScreen", "Scheduled $count alarms via scheduleAllAlarmsForToday")
             } catch (e: Exception) {
                 Log.e("MainScreen", "Failed to schedule alarms", e)
             }
@@ -236,7 +225,7 @@ fun MainScreen(
         ) {
             Column {
                 Text(
-                    text = "Salat Tracker",
+                    text = "Falah",
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onBackground
@@ -643,26 +632,26 @@ private fun PrayerTimeRow(
 /**
  * Determines the hero card state based on the current time and prayer schedule.
  *
- * Time windows:
+ * Time windows (with 30-min buffer before next prayer):
  * - [Prayer Start] to [Prayer Start + 15 min] → GRACE (lock warning)
- * - [Prayer Start + 15 min] to [Next Boundary] → ACTIVE (prayer active, counting down to end)
- * - [Next Boundary] to [Next Prayer Start] → WAITING (counting down to next prayer)
+ * - [Prayer Start + 15 min] to [Next Prayer - 30 min] → ACTIVE (prayer active)
+ * - [Next Prayer - 30 min] to [Next Prayer Start] → WAITING (next prayer countdown)
  *
- * Boundaries:
+ * Prayer boundaries:
  * - Fajr ends at Sunrise
- * - Dhuhr ends at Asr
- * - Asr ends at Maghrib
- * - Maghrib ends at Isha
+ * - Dhuhr ends at Asr (with 30-min buffer)
+ * - Asr ends at Maghrib (with 30-min buffer)
+ * - Maghrib ends at Isha (with 30-min buffer)
  * - Isha ends at midnight (23:59)
  */
 private fun calculateHeroInfo(entity: PrayerTimeEntity): HeroInfo {
     val now = LocalTime.now()
 
-    // Build time pairs: (prayerName, startTime, endTime)
     data class PrayerWindow(
         val name: String,
         val start: LocalTime,
-        val end: LocalTime
+        val rawEnd: LocalTime,    // original end boundary (next prayer or sunrise)
+        val activeEnd: LocalTime  // end of ACTIVE display = rawEnd - 30 min (or rawEnd if buffer doesn't fit)
     )
 
     val fajr = LocalTime.parse(entity.fajr, TIME_FORMAT)
@@ -672,20 +661,28 @@ private fun calculateHeroInfo(entity: PrayerTimeEntity): HeroInfo {
     val maghrib = LocalTime.parse(entity.maghrib, TIME_FORMAT)
     val isha = LocalTime.parse(entity.isha, TIME_FORMAT)
 
+    // Helper: subtract 30 min but never go before the prayer's own grace end
+    fun bufferEnd(start: LocalTime, rawEnd: LocalTime): LocalTime {
+        val graceEnd = start.plusMinutes(GRACE_PERIOD_MINUTES)
+        val buffered = rawEnd.minusMinutes(NEXT_PRAYER_BUFFER_MINUTES)
+        // If buffered end would be before grace end, just use raw end (window too short for buffer)
+        return if (buffered.isAfter(graceEnd)) buffered else rawEnd
+    }
+
     val windows = listOf(
-        PrayerWindow("Fajr", fajr, sunrise),
-        PrayerWindow("Dhuhr", dhuhr, asr),
-        PrayerWindow("Asr", asr, maghrib),
-        PrayerWindow("Maghrib", maghrib, isha),
-        PrayerWindow("Isha", isha, LocalTime.of(23, 59)),
+        PrayerWindow("Fajr", fajr, sunrise, bufferEnd(fajr, sunrise)),
+        PrayerWindow("Dhuhr", dhuhr, asr, bufferEnd(dhuhr, asr)),
+        PrayerWindow("Asr", asr, maghrib, bufferEnd(asr, maghrib)),
+        PrayerWindow("Maghrib", maghrib, isha, bufferEnd(maghrib, isha)),
+        PrayerWindow("Isha", isha, LocalTime.of(23, 59), LocalTime.of(23, 59)), // No buffer for last prayer
     )
 
     // Check each prayer window
     for (window in windows) {
         val graceEnd = window.start.plusMinutes(GRACE_PERIOD_MINUTES)
 
+        // GRACE period: [start, start + 15 min)
         if (!now.isBefore(window.start) && now.isBefore(graceEnd)) {
-            // GRACE period
             val mins = ChronoUnit.MINUTES.between(now, graceEnd)
             return HeroInfo(
                 state = HeroState.GRACE,
@@ -696,9 +693,9 @@ private fun calculateHeroInfo(entity: PrayerTimeEntity): HeroInfo {
             )
         }
 
-        if (!now.isBefore(graceEnd) && now.isBefore(window.end)) {
-            // ACTIVE period
-            val mins = ChronoUnit.MINUTES.between(now, window.end)
+        // ACTIVE period: [start + 15 min, activeEnd)
+        if (!now.isBefore(graceEnd) && now.isBefore(window.activeEnd)) {
+            val mins = ChronoUnit.MINUTES.between(now, window.activeEnd)
             return HeroInfo(
                 state = HeroState.ACTIVE,
                 prayerName = window.name,
@@ -709,7 +706,7 @@ private fun calculateHeroInfo(entity: PrayerTimeEntity): HeroInfo {
         }
     }
 
-    // Not inside any window — find next upcoming prayer
+    // Not inside any active window — find next upcoming prayer
     val allPrayers = listOf(
         "Fajr" to fajr,
         "Dhuhr" to dhuhr,

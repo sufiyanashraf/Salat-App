@@ -11,11 +11,6 @@ import com.example.salattracker.scheduler.PrayerAlarmScheduler
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.flow.firstOrNull
-import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.LocalTime
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 /**
  * Worker that fetches today's prayer times and schedules exact alarms
@@ -36,16 +31,6 @@ class PrayerTimeWorker @AssistedInject constructor(
     companion object {
         private const val TAG = "PrayerTimeWorker"
         const val WORK_NAME = "prayer_time_sync"
-
-        private val TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm")
-
-        private val PRAYER_FIELDS = listOf(
-            "Fajr" to { entity: com.example.salattracker.data.local.PrayerTimeEntity -> entity.fajr },
-            "Dhuhr" to { entity: com.example.salattracker.data.local.PrayerTimeEntity -> entity.dhuhr },
-            "Asr" to { entity: com.example.salattracker.data.local.PrayerTimeEntity -> entity.asr },
-            "Maghrib" to { entity: com.example.salattracker.data.local.PrayerTimeEntity -> entity.maghrib },
-            "Isha" to { entity: com.example.salattracker.data.local.PrayerTimeEntity -> entity.isha }
-        )
     }
 
     override suspend fun doWork(): Result {
@@ -79,30 +64,8 @@ class PrayerTimeWorker @AssistedInject constructor(
                 return Result.retry()
             }
 
-            // Cancel all existing alarms before rescheduling
-            scheduler.cancelAll()
-
-            val now = LocalDateTime.now()
-            val today = LocalDate.now()
-            val zone = ZoneId.systemDefault()
-            var scheduledCount = 0
-
-            for ((prayerName, timeGetter) in PRAYER_FIELDS) {
-                val timeStr = timeGetter(entity)
-                val prayerTime = LocalTime.parse(timeStr, TIME_FORMATTER)
-                val prayerDateTime = LocalDateTime.of(today, prayerTime)
-
-                // Only schedule alarms for prayers that haven't passed yet
-                if (prayerDateTime.isAfter(now)) {
-                    val triggerMillis = prayerDateTime.atZone(zone).toInstant().toEpochMilli()
-                    scheduler.scheduleExactAlarm(prayerName, triggerMillis)
-                    scheduledCount++
-                    Log.d(TAG, "Scheduled $prayerName at $timeStr ($triggerMillis)")
-                } else {
-                    Log.d(TAG, "Skipped $prayerName ($timeStr) — already passed")
-                }
-            }
-
+            // Intelligently schedule alarms (handles grace period & immediate lock)
+            val scheduledCount = scheduler.scheduleAllAlarmsForToday(entity)
             Log.d(TAG, "Prayer time sync complete: $scheduledCount alarms scheduled")
 
             // Clean up old entries
